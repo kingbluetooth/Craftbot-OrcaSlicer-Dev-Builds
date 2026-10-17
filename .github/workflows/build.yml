@@ -97,22 +97,20 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # The project currently defines its base version literally in version.inc.
-          # Capture the first quoted value from that declaration.
+          # Read the literal CMake version assignment. Select the first definition
+          # so the later suffix-appending reassignment is deliberately ignored.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_.Contains('SoftFever_VERSION') -and $_.Contains('set(') } |
+            Where-Object { $_.Contains('SoftFever_VERSION') -and $_.Contains('set(') -and $_.Contains([string][char]34) } |
             Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No SoftFever_VERSION declaration found in version.inc"
+          if (-not $versionLine) {
+            throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $quotes = [regex]::Matches($versionLine, [string][char]34)
-          if ($quotes.Count -lt 2) {
+          $quote = [string][char]34
+          $parts = $versionLine.Split([string[]]@($quote), [StringSplitOptions]::None)
+          if ($parts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($parts[1])) {
             throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $versionLine.Substring($quotes[0].Index + 1, $quotes[1].Index - $quotes[0].Index - 1)
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION declaration has an empty value"
-          }
+          $version = $parts[1]
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
