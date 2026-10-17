@@ -255,7 +255,7 @@ jobs:
           tag_name: craftbot-${{ needs.check-source.outputs.source_sha }}
           name: CraftBot OrcaSlicer ${{ steps.info.outputs.version }} (${{ steps.info.outputs.source_ref }})
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
           body: |
             Automated Windows x64 build of the CraftBot OrcaSlicer source.
 
@@ -265,7 +265,7 @@ jobs:
             Source ref: \`${{ steps.info.outputs.source_ref }}\`
             Source commit: \`${{ steps.info.outputs.sha }}\`
 
-            **Upstream changes since the previous build:** ${{ steps.changelog.outputs.url }}
+            **Full Changelog (Skoma source changes since the previous build):** ${{ steps.changelog.outputs.url }}
 
             Built by this repository's GitHub Actions workflow.
           files: |
