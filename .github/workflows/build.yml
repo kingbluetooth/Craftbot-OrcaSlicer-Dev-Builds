@@ -97,20 +97,21 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the literal CMake version assignment. Select the first definition
-          # so the later suffix-appending reassignment is deliberately ignored.
+          # version.inc defines the base version on a line like:
+          # set(SoftFever_VERSION "2.5.0-dev")
+          # Extract the literal value without regex backslash escaping.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_.Contains('SoftFever_VERSION') -and $_.Contains('set(') -and $_.Contains([string][char]34) } |
-            Select-Object -First 1
-          if (-not $versionLine) {
-            throw "No literal SoftFever_VERSION declaration found in version.inc"
+            Select-String -SimpleMatch 'SoftFever_VERSION "' |
+            Select-Object -First 1 -ExpandProperty Line
+          if ($null -eq $versionLine) {
+            throw "No SoftFever_VERSION declaration found in version.inc"
           }
-          $quote = [string][char]34
-          $parts = $versionLine.Split([string[]]@($quote), [StringSplitOptions]::None)
-          if ($parts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($parts[1])) {
+
+          $versionParts = $versionLine.Split([char]34)
+          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
             throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $parts[1]
+          $version = $versionParts[1]
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
