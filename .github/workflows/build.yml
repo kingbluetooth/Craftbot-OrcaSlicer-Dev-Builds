@@ -98,15 +98,12 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # version.inc has a literal set(SoftFever_VERSION "...") declaration.
-          # Find the first declaration, then extract the quoted value directly.
-          $versionLine = $versionContent -split "`n" |
-            Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
-            Select-Object -First 1
-          $quoteStart = $versionLine.IndexOf('"')
-          $quoteEnd = $versionLine.IndexOf('"', $quoteStart + 1)
-          if ($quoteStart -ge 0 -and $quoteEnd -gt $quoteStart) {
-            $version = $versionLine.Substring($quoteStart + 1, $quoteEnd - $quoteStart - 1)
+          # Match CMake's literal base version line. Double-quoted PowerShell
+          # strings treat backslash literally, so regex grouping uses single escapes.
+          $versionPattern = '(?m)^\s*set\(SoftFever_VERSION\s+"([^"]+)"\)'
+          $versionMatch = [regex]::Match($versionContent, $versionPattern)
+          if ($versionMatch.Success) {
+            $version = $versionMatch.Groups[1].Value
           } else {
             Write-Host "version.inc contents:"
             Write-Host $versionContent
