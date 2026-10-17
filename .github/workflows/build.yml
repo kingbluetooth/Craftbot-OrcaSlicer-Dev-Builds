@@ -98,17 +98,18 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # Extract the first quoted value from the literal CMake declaration.
+          # The build version is recorded as the first set(SoftFever_VERSION "...") line.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
-          if ($null -eq $versionLine) {
-            throw "No literal set(SoftFever_VERSION ...) declaration found in version.inc"
+          if (-not $versionLine) {
+            throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $version = $versionLine.Split([char]34)[1]
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION is present but its quoted value is empty"
+          $versionParts = $versionLine.Split([char]34)
+          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
+            throw "Could not extract the quoted SoftFever_VERSION value from version.inc"
           }
+          $version = $versionParts[1]
 
           Write-Host "Source ref : $sourceRef"
           Write-Host "Commit     : $sha"
