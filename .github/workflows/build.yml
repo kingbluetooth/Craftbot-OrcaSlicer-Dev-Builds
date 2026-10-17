@@ -98,7 +98,7 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          if ($versionContent -match 'set\(SoftFever_VERSION "(.*?)"\)') {
+          if ($versionContent -match 'set\\(SoftFever_VERSION "(.*?)"\\)') {
             $version = $matches[1]
           } else {
             throw "Could not determine SoftFever_VERSION from version.inc"
@@ -131,13 +131,14 @@ jobs:
           choco install strawberryperl nsis -y
 
       # Cache the compiled dependency tree separately from OrcaSlicer's own
-      # build tree. Dependency versions are defined by the dependency source;
-      # changing OrcaSlicer source does not require rebuilding them.
+      # build tree. The key uses Git object IDs computed once in the info step;
+      # avoid hashFiles() over the large dependency tree because GitHub's
+      # expression evaluation can time out while finalizing the job.
       - name: Restore dependency build cache
         uses: actions/cache@v6
         with:
           path: source/deps/build
-          key: ${{ runner.os }}-x64-msvc-deps-windows-v3-${{ steps.info.outputs.deps_tree }}-${{ steps.info.outputs.build_script_sha }}
+          key: ${{ runner.os }}-x64-msvc-deps-windows-v4-${{ steps.info.outputs.deps_tree }}-${{ steps.info.outputs.build_script_sha }}
 
       - name: Build dependencies
         working-directory: source
@@ -164,10 +165,10 @@ jobs:
         working-directory: source
         shell: cmd
         run: |
-          scripts\build_preset_cache.bat --prune-source "build" "resources\profiles"
+          scripts\\build_preset_cache.bat --prune-source "build" "resources\\profiles"
 
       - name: Create Windows installer
-        working-directory: source\build
+        working-directory: source\\build
         shell: pwsh
         run: |
           cpack -G NSIS
@@ -177,13 +178,13 @@ jobs:
         shell: pwsh
         run: |
           $zip = "OrcaSlicerForCraftbot_Windows_${{ steps.info.outputs.version }}_${{ steps.info.outputs.short_sha }}_portable.zip"
-          & "$env:GITHUB_WORKSPACE\source\tools\7z.exe" a -tzip "$env:GITHUB_WORKSPACE\source\build\$zip" "$env:GITHUB_WORKSPACE\source\build\OrcaSlicerForCraftbot"
+          & "$env:GITHUB_WORKSPACE\\source\\tools\\7z.exe" a -tzip "$env:GITHUB_WORKSPACE\\source\\build\\$zip" "$env:GITHUB_WORKSPACE\\source\\build\\OrcaSlicerForCraftbot"
           if ($LASTEXITCODE -ne 0) {
             throw "7-Zip failed with exit code $LASTEXITCODE"
           }
 
       - name: Verify release files
-        working-directory: source\build
+        working-directory: source\\build
         shell: pwsh
         run: |
           $installer = Get-ChildItem -File -Filter "OrcaSlicerForCraftbot_Windows_Installer_*.exe"
@@ -207,7 +208,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: CraftBot-OrcaSlicer-Windows-x64-Installer
-          path: source\build\OrcaSlicerForCraftbot_Windows_Installer_*.exe
+          path: source\\build\\OrcaSlicerForCraftbot_Windows_Installer_*.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -215,7 +216,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: CraftBot-OrcaSlicer-Windows-x64-Portable
-          path: source\build\OrcaSlicerForCraftbot_Windows_*_portable.zip
+          path: source\\build\\OrcaSlicerForCraftbot_Windows_*_portable.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -235,5 +236,5 @@ jobs:
 
             Built by this repository's GitHub Actions workflow.
           files: |
-            source\build\OrcaSlicerForCraftbot_Windows_Installer_*.exe
-            source\build\OrcaSlicerForCraftbot_Windows_*_portable.zip
+            source\\build\\OrcaSlicerForCraftbot_Windows_Installer_*.exe
+            source\\build\\OrcaSlicerForCraftbot_Windows_*_portable.zip
