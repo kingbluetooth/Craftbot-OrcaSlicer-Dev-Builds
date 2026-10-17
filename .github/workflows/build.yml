@@ -97,22 +97,24 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the first literal version definition from CMake's version.inc.
+          # version.inc is CMake syntax. Its first literal declaration gives the
+          # base version; the build script adds the suffix later.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No literal SoftFever_VERSION declaration found in version.inc"
+          if (-not $versionLine) {
+            throw "No SoftFever_VERSION declaration found in version.inc"
           }
 
-          # PowerShell treats backslashes literally; this pattern has one escape
-          # before each CMake parenthesis and captures the quoted base version.
-          $versionPattern = 'set\(SoftFever_VERSION\s+"([^"]+)"\)'
-          $versionMatch = [regex]::Match($versionLine, $versionPattern)
-          if (-not $versionMatch.Success) {
-            throw "Could not extract SoftFever_VERSION from line: $versionLine"
+          $versionLine = $versionLine.Trim()
+          $prefix = 'set(SoftFever_VERSION "'
+          if (-not $versionLine.StartsWith($prefix) -or -not $versionLine.EndsWith('")')) {
+            throw "Unexpected SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $versionMatch.Groups[1].Value
+          $version = $versionLine.Substring($prefix.Length, $versionLine.Length - $prefix.Length - 2)
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "SoftFever_VERSION declaration has an empty value"
+          }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
