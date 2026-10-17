@@ -101,7 +101,7 @@ jobs:
           # Read the first literal version declaration. CMake re-assigns this
           # variable later using "${SoftFever_VERSION}${Skoma_SUFFIX}".
           # In PowerShell single-quoted regexes, parentheses are escaped once.
-          $versionPattern = '(?m)^\s*set\(SoftFever_VERSION\s+"([^"]+)"\)\s*
+          $versionPattern = '(?m)^\s*set\(SoftFever_VERSION\s+"([^"]+)"\)\s*$'
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
           "deps_tree=$depsTree" >> $env:GITHUB_OUTPUT
