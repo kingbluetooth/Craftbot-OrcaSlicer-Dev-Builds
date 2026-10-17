@@ -25,7 +25,7 @@ on:
         default: "failure,cancelled,skipped,action_required"
         options:
           - "ALL"
-          - "failure,cancelled,skipped,action_required"
+          - "Unsuccessful: action_required,cancelled,failure,skipped"
           - "failure"
           - "cancelled"
           - "skipped"
@@ -54,5 +54,10 @@ jobs:
           retain_days: ${{ inputs.retain_days }}
           keep_minimum_runs: ${{ inputs.keep_minimum_runs }}
           delete_workflow_pattern: ${{ inputs.delete_workflow_pattern }}
-          delete_run_by_conclusion_pattern: ${{ inputs.conclusions == 'ALL' && 'ALL' || inputs.conclusions }}
+          delete_run_by_conclusion_pattern: >-
+            ${{
+              startsWith(inputs.conclusions, 'Unsuccessful:') &&
+              'action_required,cancelled,failure,skipped' ||
+              inputs.conclusions
+            }}
           dry_run: ${{ inputs.dry_run }}
