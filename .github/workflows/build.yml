@@ -98,18 +98,22 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # Use the first literal SoftFever_VERSION declaration for packaging.
-          # CMake sets the same variable again later using the suffix.
+          # The source uses CMake syntax: set(SoftFever_VERSION "2.5.0-dev").
+          # Extract its quoted value without depending on shell regex escaping.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No literal SoftFever_VERSION declaration found in version.inc"
+          if ($null -eq $versionLine) {
+            throw "No SoftFever_VERSION declaration found in version.inc"
           }
-          $version = $versionLine.Substring($versionLine.IndexOf([char]34) + 1)
-          $version = $version.Substring(0, $version.IndexOf([char]34))
+          $firstQuote = $versionLine.IndexOf([char]34)
+          $secondQuote = $versionLine.IndexOf([char]34, $firstQuote + 1)
+          if ($firstQuote -lt 0 -or $secondQuote -le $firstQuote) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          }
+          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "The literal SoftFever_VERSION value is empty"
+            throw "SoftFever_VERSION declaration has an empty value"
           }
 
           Write-Host "Source ref : $sourceRef"
