@@ -98,15 +98,15 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # The build version is recorded as the first set(SoftFever_VERSION "...") line.
+          # Parse the first literal version definition using a line anchored match.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
-          if (-not $versionLine) {
+          if ($null -eq $versionLine) {
             throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $versionParts = $versionLine.Split([char]34)
-          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
+          $versionParts = $versionLine -split [char]34
+          if ($versionParts.Count -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
             throw "Could not extract the quoted SoftFever_VERSION value from version.inc"
           }
           $version = $versionParts[1]
