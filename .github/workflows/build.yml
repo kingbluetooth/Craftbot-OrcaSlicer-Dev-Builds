@@ -259,6 +259,8 @@ jobs:
           body: |
             Automated Windows x64 build of the CraftBot OrcaSlicer source.
 
+            **Downloads:** Use the Windows installer (.exe) or portable application ZIP listed below. GitHub automatically displays separate "Source code (zip)" and "Source code (tar.gz)" snapshots for every release; these are not compiled application downloads.
+
             Source repository: https://github.com/Skoma93/OrcaSlicer
             Source ref: \`${{ steps.info.outputs.source_ref }}\`
             Source commit: \`${{ steps.info.outputs.sha }}\`
