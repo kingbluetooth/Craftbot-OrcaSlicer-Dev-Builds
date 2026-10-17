@@ -1,15 +1,15 @@
-# Craftbot OrcaSlicer Builds
+# Craftbot OrcaSlicer Dev Builds
 
-Craftbot-tuned builds of [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer), based on the work of [Skoma](https://x.com/).
+Craftbot-tuned development builds of [OrcaSlicer](https://github.com/Skoma93/OrcaSlicer/tree/cu-dev2), compiled from Skoma's `cu-dev2` branch.
+
+Tested and working well on the Craftbot Flow IDEX with the latest firmware.
 
 [![Builds](https://github.com/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds/actions/workflows/build.yml/badge.svg)](https://github.com/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds/actions)
 [![GitHub Releases](https://img.shields.io/github/v/release/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds?label=latest%20build)](https://github.com/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds/releases)
 [![License](https://img.shields.io/github/license/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds)](https://github.com/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds)
 
-## Downloads
-
-Get the latest available build from [**Releases**](https://github.com/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds/releases).
+Get the latest Windows build from [**Releases**](https://github.com/kingbluetooth/Skoma-OrcaSlicer-Dev-Builds/releases).
 
 ---
 
-This is an independent community project and is not affiliated with the OrcaSlicer or Craftbot teams. Credit and thanks to Skoma for the original work this builds on.
+An independent community project, not affiliated with the OrcaSlicer or Craftbot teams. Credit to Skoma for the upstream development work.
