@@ -98,15 +98,15 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # Parse the first literal version definition using a line anchored match.
+          # Parse the first literal version definition as a CMake string.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
-          if ($null -eq $versionLine) {
+          if ([string]::IsNullOrEmpty($versionLine)) {
             throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $versionParts = $versionLine -split [char]34
-          if ($versionParts.Count -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
+          $versionParts = $versionLine.Split([char[]]@([char]34), [StringSplitOptions]::None)
+          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
             throw "Could not extract the quoted SoftFever_VERSION value from version.inc"
           }
           $version = $versionParts[1]
