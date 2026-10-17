@@ -97,19 +97,20 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the base version from the first CMake set() declaration.
-          # Escape double quotes as a character class rather than a literal quote.
+          # Read the literal base version from the first CMake assignment.
+          # Split on the actual quote character; PowerShell single quotes do
+          # not treat backslash as an escape character.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_ -match 'SoftFever_VERSION' } |
+            Where-Object { $_.StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-          if (-not $versionLine) {
-            throw "No SoftFever_VERSION line found in version.inc"
+          if ([string]::IsNullOrWhiteSpace($versionLine)) {
+            throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $versionMatch = [regex]::Match($versionLine, '[`"]([^`"]+)[`"]')
-          if (-not $versionMatch.Success) {
-            throw "Could not extract a quoted version from: $versionLine"
+          $versionParts = $versionLine.Split([char]34)
+          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $versionMatch.Groups[1].Value
+          $version = $versionParts[1]
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
