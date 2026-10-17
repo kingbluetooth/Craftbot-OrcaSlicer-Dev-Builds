@@ -97,19 +97,16 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the first literal CMake version assignment.
+          # Extract the base version from the first CMake declaration.
+          # Call IndexOf with an integer character code to avoid quoting issues.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-          if (-not $versionLine) {
+          if ($null -eq $versionLine) {
             throw "No SoftFever_VERSION declaration found in version.inc"
           }
-
-          # CMake's current declaration is: set(SoftFever_VERSION "2.5.0-dev")
-          # Extract between its first pair of quotes without regex escaping.
-          $quote = [char]34
-          $firstQuote = $versionLine.IndexOf($quote)
-          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
+          $firstQuote = $versionLine.IndexOf(34)
+          $secondQuote = $versionLine.IndexOf(34, $firstQuote + 1)
           if ($firstQuote -lt 0 -or $secondQuote -lt 0) {
             throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
