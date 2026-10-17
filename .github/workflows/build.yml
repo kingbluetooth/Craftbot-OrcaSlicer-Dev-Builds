@@ -97,26 +97,22 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # version.inc is a CMake script. Use CMake itself to evaluate it,
-          # rather than duplicating its assignment/suffix logic in PowerShell.
-          $cmake = @'
-          include("${CMAKE_CURRENT_LIST_DIR}/version.inc")
-          message(STATUS "BUILD_VERSION=${SoftFever_VERSION}")
-          '@
-          $cmake | Set-Content -Path "$env:RUNNER_TEMP\read_version.cmake" -Encoding utf8
-          $versionOutput = & cmake -P "$env:RUNNER_TEMP\read_version.cmake" 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            $versionOutput | Write-Host
-            throw "CMake failed to read version.inc"
+          # Use a small, explicit parser for the literal version.inc CMake line.
+          # Find the first occurrence of SoftFever_VERSION and read its quoted value.
+          $versionLine = Get-Content version.inc |
+            Select-String -SimpleMatch 'SoftFever_VERSION' |
+            Select-Object -First 1 -ExpandProperty Line
+          if ([string]::IsNullOrWhiteSpace($versionLine)) {
+            throw "No SoftFever_VERSION declaration found in version.inc"
           }
-          $versionLine = $versionOutput | Where-Object { "$_" -match 'BUILD_VERSION=' } | Select-Object -First 1
-          if (-not $versionLine) {
-            $versionOutput | Write-Host
-            throw "CMake did not report BUILD_VERSION"
+          $firstQuote = $versionLine.IndexOf('"')
+          $secondQuote = $versionLine.IndexOf('"', $firstQuote + 1)
+          if ($firstQuote -lt 0 -or $secondQuote -lt 0) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = ("$versionLine" -split 'BUILD_VERSION=', 2)[1].Trim()
+          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "CMake returned an empty SoftFever_VERSION"
+            throw "SoftFever_VERSION value is empty"
           }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
