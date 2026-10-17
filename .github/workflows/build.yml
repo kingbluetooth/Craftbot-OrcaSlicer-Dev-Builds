@@ -97,23 +97,26 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Extract the first CMake set(SoftFever_VERSION "...") declaration.
+          # Read the first literal CMake version assignment.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-
           if (-not $versionLine) {
             throw "No SoftFever_VERSION declaration found in version.inc"
           }
 
-          # Split around double quotes by character code. This avoids confusing
-          # PowerShell's string parser with the CMake quote delimiter.
+          # CMake's current declaration is: set(SoftFever_VERSION "2.5.0-dev")
+          # Extract between its first pair of quotes without regex escaping.
           $quote = [char]34
-          $parts = $versionLine.Split($quote)
-          if ($parts.Count -lt 3 -or [string]::IsNullOrWhiteSpace($parts[1])) {
-            throw "Could not extract SoftFever_VERSION from line: $versionLine"
+          $firstQuote = $versionLine.IndexOf($quote)
+          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
+          if ($firstQuote -lt 0 -or $secondQuote -lt 0) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $parts[1]
+          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "SoftFever_VERSION declaration has an empty value"
+          }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
