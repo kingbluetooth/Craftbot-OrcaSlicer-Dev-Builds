@@ -98,11 +98,151 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # Match the CMake set() declaration regardless of PowerShell regex escaping.
-          # version.inc may also re-assign SoftFever_VERSION later; use the first literal version.
-          if ($versionContent -match '(?m)^\s*set\(SoftFever_VERSION\s+"([^"]+)"\)') {
+          # Read the first literal version declaration. CMake re-assigns this
+          # variable later using "${SoftFever_VERSION}${Skoma_SUFFIX}".
+          # In PowerShell single-quoted regexes, parentheses are escaped once.
+          $versionPattern = '(?m)^\s*set\(SoftFever_VERSION\s+"([^"]+)"\)\s*
+
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+          "deps_tree=$depsTree" >> $env:GITHUB_OUTPUT
+          "build_script_sha=$buildScriptSha" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "source_ref=$sourceRef" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Source ref : $sourceRef"
+          Write-Host "Commit     : $sha"
+          Write-Host "Version    : $version"
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.3.0"
+          useLocalCache: true
+          useCloudCache: true
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Install build prerequisites
+        shell: pwsh
+        run: |
+          choco install strawberryperl nsis -y
+
+      # Cache the compiled dependency tree separately from OrcaSlicer's own
+      # build tree. The key uses Git object IDs computed once in the info step;
+      # avoid hashFiles() over the large dependency tree because GitHub's
+      # expression evaluation can time out while finalizing the job.
+      - name: Restore dependency build cache
+        uses: actions/cache@v6
+        with:
+          path: source/deps/build
+          key: ${{ runner.os }}-x64-msvc-deps-windows-v4-${{ steps.info.outputs.deps_tree }}-${{ steps.info.outputs.build_script_sha }}
+
+      - name: Build dependencies
+        working-directory: source
+        shell: pwsh
+        run: |
+          cmd /c "build_win.bat -d --arch x64 --build-dir build --msvc --msbuild"
+
+      # This cache is keyed to the exact source commit because CMake object
+      # files and generated build metadata must not be reused across unrelated
+      # OrcaSlicer source revisions.
+      - name: Restore OrcaSlicer build cache
+        uses: actions/cache@v6
+        with:
+          path: source/build
+          key: ${{ runner.os }}-x64-msvc-orca-${{ steps.info.outputs.sha }}
+
+      - name: Build OrcaSlicer
+        working-directory: source
+        shell: pwsh
+        run: |
+          cmd /c "build_win.bat -s -i --arch x64 --build-dir build --msvc --msbuild"
+
+      - name: Build system preset cache
+        working-directory: source
+        shell: cmd
+        run: |
+          scripts\\build_preset_cache.bat --prune-source "build" "resources\\profiles"
+
+      - name: Create Windows installer
+        working-directory: source\\build
+        shell: pwsh
+        run: |
+          cpack -G NSIS
+
+      - name: Create portable ZIP
+        working-directory: source
+        shell: pwsh
+        run: |
+          $zip = "OrcaSlicerForCraftbot_Windows_${{ steps.info.outputs.version }}_${{ steps.info.outputs.short_sha }}_portable.zip"
+          & "$env:GITHUB_WORKSPACE\\source\\tools\\7z.exe" a -tzip "$env:GITHUB_WORKSPACE\\source\\build\\$zip" "$env:GITHUB_WORKSPACE\\source\\build\\OrcaSlicerForCraftbot"
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify release files
+        working-directory: source\\build
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -File -Filter "OrcaSlicerForCraftbot_Windows_Installer_*.exe"
+          $portable = Get-ChildItem -File -Filter "OrcaSlicerForCraftbot_Windows_*_portable.zip"
+
+          if (-not $installer) {
+            throw "Windows installer was not produced."
+          }
+
+          if (-not $portable) {
+            throw "Portable ZIP was not produced."
+          }
+
+          Write-Host "Installer:"
+          $installer | Select-Object Name, Length | Format-Table | Out-Host
+
+          Write-Host "Portable:"
+          $portable | Select-Object Name, Length | Format-Table | Out-Host
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CraftBot-OrcaSlicer-Windows-x64-Installer
+          path: source\\build\\OrcaSlicerForCraftbot_Windows_Installer_*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CraftBot-OrcaSlicer-Windows-x64-Portable
+          path: source\\build\\OrcaSlicerForCraftbot_Windows_*_portable.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: craftbot-${{ needs.check-source.outputs.source_sha }}
+          name: CraftBot OrcaSlicer ${{ steps.info.outputs.version }} (${{ steps.info.outputs.source_ref }})
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            Automated Windows x64 build of the CraftBot OrcaSlicer source.
+
+            Source repository: https://github.com/Skoma93/OrcaSlicer
+            Source ref: \`${{ steps.info.outputs.source_ref }}\`
+            Source commit: \`${{ steps.info.outputs.sha }}\`
+
+            Built by this repository's GitHub Actions workflow.
+          files: |
+            source\\build\\OrcaSlicerForCraftbot_Windows_Installer_*.exe
+            source\\build\\OrcaSlicerForCraftbot_Windows_*_portable.zip
+
+          if ($versionContent -match $versionPattern) {
             $version = $matches[1]
           } else {
+            Write-Host "version.inc contents:"
+            Write-Host $versionContent
             throw "Could not determine a literal SoftFever_VERSION from version.inc"
           }
 
