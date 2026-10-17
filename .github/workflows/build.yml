@@ -97,25 +97,26 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Let CMake evaluate the project's version instead of parsing CMake
-          # syntax in PowerShell. This matches the literal version.inc assignment
-          # plus the suffix that CMake applies immediately afterwards.
-          $versionLine = Get-Content version.inc |
-            Select-String -SimpleMatch 'SoftFever_VERSION' |
-            Where-Object { $_.Line.Contains('set(') -and $_.Line.Contains([char]34) } |
-            Select-Object -First 1 -ExpandProperty Line
+          # version.inc is a CMake script. Use CMake itself to evaluate it,
+          # rather than duplicating its assignment/suffix logic in PowerShell.
+          $cmake = @'
+          include("${CMAKE_CURRENT_LIST_DIR}/version.inc")
+          message(STATUS "BUILD_VERSION=${SoftFever_VERSION}")
+          '@
+          $cmake | Set-Content -Path "$env:RUNNER_TEMP\read_version.cmake" -Encoding utf8
+          $versionOutput = & cmake -P "$env:RUNNER_TEMP\read_version.cmake" 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            $versionOutput | Write-Host
+            throw "CMake failed to read version.inc"
+          }
+          $versionLine = $versionOutput | Where-Object { "$_" -match 'BUILD_VERSION=' } | Select-Object -First 1
           if (-not $versionLine) {
-            throw "No literal SoftFever_VERSION assignment found in version.inc"
+            $versionOutput | Write-Host
+            throw "CMake did not report BUILD_VERSION"
           }
-          $versionLine = $versionLine.Trim()
-          $openQuote = $versionLine.IndexOf([char]34)
-          $closeQuote = $versionLine.IndexOf([char]34, $openQuote + 1)
-          if ($openQuote -lt 0 -or $closeQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION assignment: $versionLine"
-          }
-          $version = $versionLine.Substring($openQuote + 1, $closeQuote - $openQuote - 1)
+          $version = ("$versionLine" -split 'BUILD_VERSION=', 2)[1].Trim()
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "The extracted SoftFever_VERSION value is empty"
+            throw "CMake returned an empty SoftFever_VERSION"
           }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
