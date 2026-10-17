@@ -98,13 +98,15 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # version.inc uses a literal CMake set() declaration for the base version.
-          # Extract the first quoted value without relying on regex escaping across YAML.
+          # version.inc has a literal set(SoftFever_VERSION "...") declaration.
+          # Find the first declaration, then extract the quoted value directly.
           $versionLine = $versionContent -split "`n" |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
-          if ($versionLine -match 'set\(SoftFever_VERSION\s+"([^"]+)"\)') {
-            $version = $matches[1]
+          $quoteStart = $versionLine.IndexOf('"')
+          $quoteEnd = $versionLine.IndexOf('"', $quoteStart + 1)
+          if ($quoteStart -ge 0 -and $quoteEnd -gt $quoteStart) {
+            $version = $versionLine.Substring($quoteStart + 1, $quoteEnd - $quoteStart - 1)
           } else {
             Write-Host "version.inc contents:"
             Write-Host $versionContent
