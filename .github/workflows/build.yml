@@ -98,16 +98,14 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # The version is already defined by the source project; avoid fragile
-          # parsing of CMake syntax in PowerShell. Read the quoted literal directly.
+          # Extract the first quoted value from the literal CMake declaration.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
           if ($null -eq $versionLine) {
             throw "No literal set(SoftFever_VERSION ...) declaration found in version.inc"
           }
-          $version = $versionLine.Substring($versionLine.IndexOf('"') + 1)
-          $version = $version.Substring(0, $version.IndexOf('"'))
+          $version = $versionLine.Split([char]34)[1]
           if ([string]::IsNullOrWhiteSpace($version)) {
             throw "SoftFever_VERSION is present but its quoted value is empty"
           }
