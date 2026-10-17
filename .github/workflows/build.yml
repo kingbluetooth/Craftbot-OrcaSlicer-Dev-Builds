@@ -97,27 +97,25 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # version.inc uses CMake's literal set(SoftFever_VERSION "...")
-          # declaration. Extract its quoted value without using a regex.
+          # Let CMake evaluate the project's version instead of parsing CMake
+          # syntax in PowerShell. This matches the literal version.inc assignment
+          # plus the suffix that CMake applies immediately afterwards.
           $versionLine = Get-Content version.inc |
             Select-String -SimpleMatch 'SoftFever_VERSION' |
+            Where-Object { $_.Line.Contains('set(') -and $_.Line.Contains([char]34) } |
             Select-Object -First 1 -ExpandProperty Line
-          if ([string]::IsNullOrWhiteSpace($versionLine) -or -not $versionLine.Contains('set(')) {
-            throw "No SoftFever_VERSION set() declaration found in version.inc"
+          if (-not $versionLine) {
+            throw "No literal SoftFever_VERSION assignment found in version.inc"
           }
-
-          $quote = [string][char]34
-          $firstQuote = $versionLine.IndexOf($quote)
-          if ($firstQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          $versionLine = $versionLine.Trim()
+          $openQuote = $versionLine.IndexOf([char]34)
+          $closeQuote = $versionLine.IndexOf([char]34, $openQuote + 1)
+          if ($openQuote -lt 0 -or $closeQuote -lt 0) {
+            throw "Malformed SoftFever_VERSION assignment: $versionLine"
           }
-          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
-          if ($secondQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
-          }
-          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
+          $version = $versionLine.Substring($openQuote + 1, $closeQuote - $openQuote - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION declaration has an empty value"
+            throw "The extracted SoftFever_VERSION value is empty"
           }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
