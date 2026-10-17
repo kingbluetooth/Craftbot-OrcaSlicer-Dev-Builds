@@ -98,18 +98,19 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # Parse the first literal version definition as a CMake string.
+          # Use the first literal SoftFever_VERSION declaration for packaging.
+          # CMake sets the same variable again later using the suffix.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
             Select-Object -First 1
-          if ([string]::IsNullOrEmpty($versionLine)) {
+          if ([string]::IsNullOrWhiteSpace($versionLine)) {
             throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $versionParts = $versionLine.Split([char[]]@([char]34), [StringSplitOptions]::None)
-          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
-            throw "Could not extract the quoted SoftFever_VERSION value from version.inc"
+          $version = $versionLine.Substring($versionLine.IndexOf([char]34) + 1)
+          $version = $version.Substring(0, $version.IndexOf([char]34))
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "The literal SoftFever_VERSION value is empty"
           }
-          $version = $versionParts[1]
 
           Write-Host "Source ref : $sourceRef"
           Write-Host "Commit     : $sha"
