@@ -1,0 +1,58 @@
+name: Delete Workflow Runs
+
+on:
+  workflow_dispatch:
+    inputs:
+      retain_days:
+        description: "Delete runs at least this many days old (use 0 to target all eligible runs)"
+        type: number
+        required: true
+        default: 30
+      keep_minimum_runs:
+        description: "Keep at least this many recent runs per workflow"
+        type: number
+        required: true
+        default: 6
+      delete_workflow_pattern:
+        description: "Optional workflow name or filename filter (leave blank for all workflows)"
+        type: string
+        required: false
+        default: ""
+      conclusions:
+        description: "Which run conclusions to clean up"
+        type: choice
+        required: true
+        default: "failure,cancelled,skipped,action_required"
+        options:
+          - "ALL"
+          - "failure,cancelled,skipped,action_required"
+          - "failure"
+          - "cancelled"
+          - "skipped"
+          - "success"
+      dry_run:
+        description: "Preview what would be deleted without deleting anything"
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  delete-runs:
+    name: Clean up workflow run history
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2.1.0
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: ${{ inputs.retain_days }}
+          keep_minimum_runs: ${{ inputs.keep_minimum_runs }}
+          delete_workflow_pattern: ${{ inputs.delete_workflow_pattern }}
+          delete_run_by_conclusion_pattern: ${{ inputs.conclusions == 'ALL' && 'ALL' || inputs.conclusions }}
+          dry_run: ${{ inputs.dry_run }}
