@@ -96,25 +96,35 @@ jobs:
           $depsTree = git rev-parse HEAD:deps
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
-          $versionContent = Get-Content version.inc -Raw
 
-          # The source uses CMake syntax: set(SoftFever_VERSION "2.5.0-dev").
-          # Extract its quoted value without depending on shell regex escaping.
+          # version.inc is a CMake file. Extract the first literal declaration
+          # using a narrow match and explicit quote boundaries.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
+            Where-Object { $_.Trim().StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-          if ($null -eq $versionLine) {
-            throw "No SoftFever_VERSION declaration found in version.inc"
+          if ([string]::IsNullOrWhiteSpace($versionLine)) {
+            throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
-          $firstQuote = $versionLine.IndexOf([char]34)
-          $secondQuote = $versionLine.IndexOf([char]34, $firstQuote + 1)
-          if ($firstQuote -lt 0 -or $secondQuote -le $firstQuote) {
+          $quote = [string][char]34
+          $firstQuote = $versionLine.IndexOf($quote)
+          if ($firstQuote -lt 0) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          }
+          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
+          if ($secondQuote -le $firstQuote) {
             throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
           $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
             throw "SoftFever_VERSION declaration has an empty value"
           }
+
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+          "deps_tree=$depsTree" >> $env:GITHUB_OUTPUT
+          "build_script_sha=$buildScriptSha" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "source_ref=$sourceRef" >> $env:GITHUB_OUTPUT
 
           Write-Host "Source ref : $sourceRef"
           Write-Host "Commit     : $sha"
