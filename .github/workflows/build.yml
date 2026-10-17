@@ -97,22 +97,25 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Use a small, explicit parser for the literal version.inc CMake line.
-          # Find the first occurrence of SoftFever_VERSION and read its quoted value.
+          # Read the first CMake assignment with a quoted literal version.
+          # Keep parsing simple: no regex or shell-specific escape sequences.
           $versionLine = Get-Content version.inc |
-            Select-String -SimpleMatch 'SoftFever_VERSION' |
-            Select-Object -First 1 -ExpandProperty Line
+            Where-Object { $_.Contains('SoftFever_VERSION') -and $_.Contains('set(') } |
+            Select-Object -First 1
           if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No SoftFever_VERSION declaration found in version.inc"
+            throw "No SoftFever_VERSION assignment found in version.inc"
           }
-          $firstQuote = $versionLine.IndexOf('"')
-          $secondQuote = $versionLine.IndexOf('"', $firstQuote + 1)
-          if ($firstQuote -lt 0 -or $secondQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          $quote = [char]34
+          $quoteIndexes = @()
+          for ($i = 0; $i -lt $versionLine.Length; $i++) {
+            if ($versionLine[$i] -eq $quote) { $quoteIndexes += $i }
           }
-          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
+          if ($quoteIndexes.Count -lt 2) {
+            throw "Malformed SoftFever_VERSION assignment: $versionLine"
+          }
+          $version = $versionLine.Substring($quoteIndexes[0] + 1, $quoteIndexes[1] - $quoteIndexes[0] - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION value is empty"
+            throw "SoftFever_VERSION assignment contains an empty value"
           }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
