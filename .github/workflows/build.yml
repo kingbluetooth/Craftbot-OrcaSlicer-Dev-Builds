@@ -98,19 +98,19 @@ jobs:
           $sourceRef = "${{ inputs.source_ref }}"
           $versionContent = Get-Content version.inc -Raw
 
-          # Read the first literal version declaration. CMake re-assigns this
-          # variable later using "${SoftFever_VERSION}${Skoma_SUFFIX}".
-          # In PowerShell single-quoted regexes, parentheses are escaped once.
-          # Use a single-quoted PowerShell regex; escape each CMake parenthesis once.
-          $versionPattern = '(?m)^\s*set\(SoftFever_VERSION\s+"([^"]+)"\)'
-          $versionMatch = [regex]::Match($versionContent, $versionPattern)
-          if ($versionMatch.Success) {
-            $version = $versionMatch.Groups[1].Value
+          # version.inc uses a literal CMake set() declaration for the base version.
+          # Extract the first quoted value without relying on regex escaping across YAML.
+          $versionLine = $versionContent -split "`n" |
+            Where-Object { $_.TrimStart().StartsWith("set(SoftFever_VERSION ") } |
+            Select-Object -First 1
+          if ($versionLine -match 'set\(SoftFever_VERSION\s+"([^"]+)"\)') {
+            $version = $matches[1]
           } else {
             Write-Host "version.inc contents:"
             Write-Host $versionContent
             throw "Could not determine a literal SoftFever_VERSION from version.inc"
           }
+
           Write-Host "Source ref : $sourceRef"
           Write-Host "Commit     : $sha"
           Write-Host "Version    : $version"
