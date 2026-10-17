@@ -97,19 +97,22 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # version.inc uses a literal CMake declaration such as:
-          # set(SoftFever_VERSION "2.5.0-dev")
-          # Read it via an anchored regex using PowerShell's single-quoted regex
-          # syntax: CMake parentheses are escaped once, not twice.
+          # Capture the quoted base version from the first CMake declaration.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_ -match '^\s*set\(SoftFever_VERSION\s+"[^"]+"\)\s*$' } |
-            Select-Object -First 1
+            Select-String -SimpleMatch 'set(SoftFever_VERSION "' |
+            Select-Object -First 1 -ExpandProperty Line
           if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "Could not find a literal SoftFever_VERSION assignment in version.inc"
+            throw "No literal SoftFever_VERSION assignment found in version.inc"
           }
-          $version = [regex]::Match($versionLine, '"([^"]+)"').Groups[1].Value
+
+          $openQuote = $versionLine.IndexOf([char]34)
+          $closeQuote = $versionLine.IndexOf([char]34, $openQuote + 1)
+          if ($openQuote -lt 0 -or $closeQuote -le $openQuote) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          }
+          $version = $versionLine.Substring($openQuote + 1, $closeQuote - $openQuote - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "Could not extract the quoted SoftFever_VERSION value: $versionLine"
+            throw "SoftFever_VERSION declaration is empty"
           }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
