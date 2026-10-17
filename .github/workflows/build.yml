@@ -228,6 +228,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Prepare upstream changelog link
+        id: changelog
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_SOURCE_SHA: ${{ steps.info.outputs.sha }}
+        run: |
+          set -euo pipefail
+          previous_source_sha="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+            jq -r --arg current "${CURRENT_SOURCE_SHA}" '
+              [.[][] | select(.draft == false and .prerelease == false)]
+              | sort_by(.published_at // .created_at // "") | reverse
+              | map((.body // "") | try capture("Source commit: .(?<sha>[0-9a-fA-F]{40}).").sha catch "")
+              | map(select(length == 40 and . != $current)) | .[0] // empty
+            ')"
+          if [[ -n "${previous_source_sha}" ]]; then
+            compare_url="https://github.com/Skoma93/OrcaSlicer/compare/${previous_source_sha}...${CURRENT_SOURCE_SHA}"
+          else
+            compare_url="https://github.com/Skoma93/OrcaSlicer/commits/cu-dev2"
+          fi
+          echo "url=${compare_url}" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -241,6 +262,8 @@ jobs:
             Source repository: https://github.com/Skoma93/OrcaSlicer
             Source ref: \`${{ steps.info.outputs.source_ref }}\`
             Source commit: \`${{ steps.info.outputs.sha }}\`
+
+            **Upstream changes since the previous build:** ${{ steps.changelog.outputs.url }}
 
             Built by this repository's GitHub Actions workflow.
           files: |
