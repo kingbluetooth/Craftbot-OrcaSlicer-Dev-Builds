@@ -97,21 +97,19 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the base application version from CMake's literal declaration.
+          # The project currently defines its base version literally in version.inc.
+          # Capture the first quoted value from that declaration.
           $versionLine = Get-Content version.inc |
-            Select-String -SimpleMatch 'SoftFever_VERSION' |
-            Where-Object { $_.Line -match 'set\(SoftFever_VERSION' } |
-            Select-Object -First 1 -ExpandProperty Line
+            Where-Object { $_.Contains('SoftFever_VERSION') -and $_.Contains('set(') } |
+            Select-Object -First 1
           if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No SoftFever_VERSION set() declaration found in version.inc"
+            throw "No SoftFever_VERSION declaration found in version.inc"
           }
-          $quote = [char]34
-          $firstQuote = $versionLine.IndexOf($quote)
-          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
-          if ($firstQuote -lt 0 -or $secondQuote -lt 0) {
+          $quotes = [regex]::Matches($versionLine, [string][char]34)
+          if ($quotes.Count -lt 2) {
             throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
+          $version = $versionLine.Substring($quotes[0].Index + 1, $quotes[1].Index - $quotes[0].Index - 1)
           if ([string]::IsNullOrWhiteSpace($version)) {
             throw "SoftFever_VERSION declaration has an empty value"
           }
