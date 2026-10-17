@@ -97,25 +97,17 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the first CMake assignment with a quoted literal version.
-          # Keep parsing simple: no regex or shell-specific escape sequences.
+          # This is the first literal CMake version assignment; the later one
+          # only appends Skoma_SUFFIX. Read the value between its quotes.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_.Contains('SoftFever_VERSION') -and $_.Contains('set(') } |
+            Where-Object { $_.StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No SoftFever_VERSION assignment found in version.inc"
+          if ($null -eq $versionLine) {
+            throw "No literal SoftFever_VERSION assignment found in version.inc"
           }
-          $quote = [char]34
-          $quoteIndexes = @()
-          for ($i = 0; $i -lt $versionLine.Length; $i++) {
-            if ($versionLine[$i] -eq $quote) { $quoteIndexes += $i }
-          }
-          if ($quoteIndexes.Count -lt 2) {
-            throw "Malformed SoftFever_VERSION assignment: $versionLine"
-          }
-          $version = $versionLine.Substring($quoteIndexes[0] + 1, $quoteIndexes[1] - $quoteIndexes[0] - 1)
+          $version = $versionLine.Split('"')[1]
           if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION assignment contains an empty value"
+            throw "Could not extract the version from: $versionLine"
           }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
