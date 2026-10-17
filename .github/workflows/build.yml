@@ -18,53 +18,318 @@ permissions:
 
 jobs:
   check-source:
-    name: Check source
+    name: Check source changes
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.check.outputs.source_sha }}
-      should_build: ${{ steps.check.outputs.should_build }}
+      short_sha: ${{ steps.check.outputs.short_sha }}
+      source_ref: ${{ steps.check.outputs.source_ref }}
+      previous_source_sha: ${{ steps.check.outputs.previous_source_sha }}
+      changelog_url: ${{ steps.check.outputs.changelog_url }}
+      release_mode: ${{ steps.classify.outputs.release_mode || steps.check.outputs.release_mode }}
 
     steps:
-      - name: Resolve source and check release
+      - name: Resolve source and inspect existing releases
         id: check
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
 
-          source_sha="$(gh api "repos/Skoma93/OrcaSlicer/commits/${{ inputs.source_ref }}" --jq '.sha')"
-          release_tag="craftbot-${source_sha}"
+          source_sha="$(gh api "repos/Skoma93/OrcaSlicer/commits/$SOURCE_REF" --jq '.sha')"
+          short_sha="$(printf '%s' "$source_sha" | cut -c1-7)"
+          release_tag="craftbot-$source_sha"
+          releases_json="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100")"
 
-          echo "Source ref : ${{ inputs.source_ref }}"
-          echo "Source SHA : ${source_sha}"
-          echo "Release tag: ${release_tag}"
+          # Read the latest published release that records a Skoma source SHA.
+          # This tolerates Markdown backticks and literal backslashes in older bodies.
+          previous_source_sha="$(printf '%s' "$releases_json" | jq -r '
+            [.[][] | select(.draft == false and .prerelease == false)
+              | {
+                  published_at: (.published_at // .created_at // ""),
+                  source_sha: ((.body // "") | try capture("Source commit: [^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{40})").sha catch "")
+                }]
+            | sort_by(.published_at) | reverse
+            | map(select(.source_sha | test("^[0-9a-fA-F]{40}$")))
+            | .[0].source_sha // empty
+          ')"
 
-          existing_tag=""
-          if gh api "repos/${{ github.repository }}/releases/tags/${release_tag}" >/dev/null 2>&1; then
-            existing_tag="${release_tag}"
+          already_released="$(printf '%s' "$releases_json" | jq -r --arg sha "$source_sha" '
+            [.[][] | select(.draft == false and .prerelease == false)
+              | ((.body // "") | try capture("Source commit: [^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{40})").sha catch "")]
+            | any(. == $sha)
+          ')"
+
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" >/dev/null 2>&1 || [[ "$already_released" == "true" ]]; then
+            release_mode="none"
+            echo "Source commit $source_sha already has a release. No build or new release is needed."
+          elif [[ -z "$previous_source_sha" ]]; then
+            # No reliable base commit means classify conservatively.
+            release_mode="full"
+            echo "No previous source commit found; selecting a full build as the safe default."
           else
-            # Also recognize releases created by the previous run-number tag scheme.
-            # The source SHA is recorded in every release body.
-            existing_tag="$(gh api --paginate --slurp "repos/${{ github.repository }}/releases?per_page=100" |
-              jq -r --arg sha "${source_sha}" '.[][] | select((.body // "") | contains($sha)) | .tag_name' |
-              head -n 1)"
+            release_mode="classify"
+            echo "Comparing upstream source $previous_source_sha -> $source_sha."
           fi
 
-          if [[ -n "${existing_tag}" ]]; then
-            echo "Release ${existing_tag} already exists for OrcaSlicer commit ${source_sha}. Nothing to build."
-            echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          if [[ -n "$previous_source_sha" ]]; then
+            changelog_url="https://github.com/Skoma93/OrcaSlicer/compare/$previous_source_sha...$source_sha"
           else
-            echo "No release exists for OrcaSlicer commit ${source_sha}. Build required."
-            echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            changelog_url="https://github.com/Skoma93/OrcaSlicer/commits/$SOURCE_REF"
           fi
 
-  build-windows:
-    name: Build Windows x64
+          {
+            echo "source_sha=$source_sha"
+            echo "short_sha=$short_sha"
+            echo "source_ref=$SOURCE_REF"
+            echo "previous_source_sha=$previous_source_sha"
+            echo "changelog_url=$changelog_url"
+            echo "release_mode=$release_mode"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout source for change classification
+        if: steps.check.outputs.release_mode == 'classify'
+        uses: actions/checkout@v7
+        with:
+          repository: Skoma93/OrcaSlicer
+          ref: ${{ steps.check.outputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          lfs: false
+
+      - name: Classify source changes
+        id: classify
+        if: steps.check.outputs.release_mode == 'classify'
+        working-directory: source
+        shell: bash
+        env:
+          PREVIOUS_SOURCE_SHA: ${{ steps.check.outputs.previous_source_sha }}
+          CURRENT_SOURCE_SHA: ${{ steps.check.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          if ! git cat-file -e "$PREVIOUS_SOURCE_SHA^{commit}" 2>/dev/null; then
+            if ! git fetch --no-tags origin "$PREVIOUS_SOURCE_SHA"; then
+              echo "Could not fetch the previous source commit; falling back to a full build."
+              echo "release_mode=full" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          changed_paths="$(git diff --name-only --no-renames "$PREVIOUS_SOURCE_SHA" "$CURRENT_SOURCE_SHA")"
+          if [[ -z "$changed_paths" ]]; then
+            echo "The source trees are identical. Nothing to build or release."
+            echo "release_mode=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed paths:"
+          printf '%s\n' "$changed_paths"
+
+          profiles_only=true
+          while IFS= read -r changed_path; do
+            [[ "$changed_path" == resources/profiles/* ]] || {
+              profiles_only=false
+              break
+            }
+          done <<< "$changed_paths"
+
+          if [[ "$profiles_only" == "true" ]]; then
+            echo "Only resources/profiles/ changed; selecting a profiles-only release."
+            echo "release_mode=profiles" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changes outside resources/profiles/ detected; selecting a full application build."
+            echo "release_mode=full" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-profiles:
+    name: Build system profile bundle
     needs: check-source
-    if: needs.check-source.outputs.should_build == 'true'
+    if: needs.check-source.outputs.release_mode == 'profiles'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      profile_package_ready: ${{ steps.result.outputs.ready }}
+
+    steps:
+      - name: Checkout Skoma source
+        uses: actions/checkout@v7
+        with:
+          repository: Skoma93/OrcaSlicer
+          ref: ${{ needs.check-source.outputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          lfs: false
+
+      # Profile-only commits do not alter application code, so re-use the
+      # profile-cache generator from the latest available full application build.
+      # If it is unavailable or fails, fall back to a full build instead.
+      - name: Restore previous application build tools
+        id: restore-build
+        uses: actions/cache/restore@v6
+        with:
+          path: source/build
+          key: ${{ runner.os }}-x64-msvc-orca-${{ needs.check-source.outputs.previous_source_sha }}
+          restore-keys: |
+            ${{ runner.os }}-x64-msvc-orca-
+
+      - name: Check for a reusable profile-cache generator
+        id: check-tool
+        shell: pwsh
+        run: |
+          $buildRoot = Join-Path $env:GITHUB_WORKSPACE "source\build"
+          $tool = Get-ChildItem -Path $buildRoot -Filter "generate_system_cache.exe" -File -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $dll = Get-ChildItem -Path $buildRoot -Filter "TKernel.dll" -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          if ($tool -and $dll) {
+            Write-Host "Reusable profile-cache tool found: $($tool.FullName)"
+            "available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Warning "No compatible cached profile-cache tool found; the workflow will fall back to a full application build."
+            "available=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Generate and package updated system profiles
+        if: steps.check-tool.outputs.available == 'true'
+        shell: pwsh
+        env:
+          PROFILE_SHORT_SHA: ${{ needs.check-source.outputs.short_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sourceRoot = Join-Path $env:GITHUB_WORKSPACE "source"
+          $profileRoot = Join-Path $sourceRoot "resources\profiles"
+          $buildRoot = Join-Path $sourceRoot "build"
+
+          $tool = Get-ChildItem -Path $buildRoot -Filter "generate_system_cache.exe" -File -Recurse |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $dll = Get-ChildItem -Path $buildRoot -Filter "TKernel.dll" -File -Recurse |
+            Select-Object -First 1
+          if (-not $tool -or -not $dll) {
+            throw "The cached profile-cache tool or runtime DLLs disappeared."
+          }
+
+          Get-ChildItem -Path $profileRoot -Filter "*.opc" -File -ErrorAction SilentlyContinue | Remove-Item -Force
+          Get-ChildItem -Path $profileRoot -Filter "*.cache" -File -ErrorAction SilentlyContinue | Remove-Item -Force
+
+          # Match Skoma's script: add the runtime DLL directory to PATH, then
+          # regenerate all vendor caches from the current resources/profiles tree.
+          $env:PATH = "$($dll.DirectoryName);$env:PATH"
+          & $tool.FullName --path $profileRoot --log_level 2
+          if ($LASTEXITCODE -ne 0) {
+            throw "generate_system_cache.exe failed with exit code $LASTEXITCODE"
+          }
+
+          $vendorCaches = @(Get-ChildItem -Path $profileRoot -Filter "*.opc" -File)
+          if ($vendorCaches.Count -eq 0) {
+            throw "The profile-cache generator did not create any .opc files."
+          }
+          if (-not (Test-Path (Join-Path $profileRoot "Craftbot.opc"))) {
+            throw "The profile-cache generator did not create Craftbot.opc."
+          }
+
+          # Where a vendor .opc exists, remove duplicate JSON presets while
+          # retaining the vendor's images, covers and other non-JSON assets.
+          foreach ($cache in $vendorCaches) {
+            $vendor = $cache.BaseName
+            $vendorJson = Join-Path $profileRoot "$vendor.json"
+            if (Test-Path $vendorJson) {
+              Remove-Item -Path $vendorJson -Force
+            }
+
+            $vendorDirectory = Join-Path $profileRoot $vendor
+            if (Test-Path $vendorDirectory -PathType Container) {
+              Get-ChildItem -Path $vendorDirectory -Filter "*.json" -File -Recurse -ErrorAction SilentlyContinue |
+                Remove-Item -Force
+
+              Get-ChildItem -Path $vendorDirectory -Directory -Recurse -ErrorAction SilentlyContinue |
+                Sort-Object { $_.FullName.Length } -Descending |
+                ForEach-Object {
+                  if ((Get-ChildItem -Path $_.FullName -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0) {
+                    Remove-Item -Path $_.FullName -Force
+                  }
+                }
+            }
+          }
+
+          $packageRoot = Join-Path $env:RUNNER_TEMP "profile-update-package"
+          if (Test-Path $packageRoot) {
+            Remove-Item -Path $packageRoot -Recurse -Force
+          }
+          $stagedProfiles = Join-Path $packageRoot "resources\profiles"
+          New-Item -ItemType Directory -Path $stagedProfiles -Force | Out-Null
+          Copy-Item -Path (Join-Path $profileRoot "*") -Destination $stagedProfiles -Recurse -Force
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archivePath = Join-Path $env:GITHUB_WORKSPACE "OrcaSlicer_System_Profiles_$($env:PROFILE_SHORT_SHA).zip"
+          if (Test-Path $archivePath) {
+            Remove-Item -Path $archivePath -Force
+          }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            $packageRoot,
+            $archivePath,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $false
+          )
+
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
+          try {
+            $expectedEntry = $archive.Entries | Where-Object { $_.FullName -eq "resources/profiles/Craftbot.opc" }
+            if (-not $expectedEntry) {
+              throw "The profile ZIP does not contain resources/profiles/Craftbot.opc."
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+          Write-Host "Created profile update: $archivePath"
+          Get-Item $archivePath | Select-Object Name, Length | Format-Table | Out-Host
+
+      - name: Upload system profile bundle
+        id: upload-profile
+        if: steps.check-tool.outputs.available == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: OrcaSlicer-System-Profiles
+          path: OrcaSlicer_System_Profiles_*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Set profile package result
+        id: result
+        if: always()
+        shell: pwsh
+        env:
+          TOOL_AVAILABLE: ${{ steps.check-tool.outputs.available }}
+          ARTIFACT_ID: ${{ steps.upload-profile.outputs.artifact-id }}
+        run: |
+          if ($env:TOOL_AVAILABLE -eq "true" -and -not [string]::IsNullOrWhiteSpace($env:ARTIFACT_ID)) {
+            "ready=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "ready=false" >> $env:GITHUB_OUTPUT
+          }
+
+    build-windows:
+    name: Build Windows x64
+    needs: [check-source, build-profiles]
+    if: >-
+      always() &&
+      needs.check-source.result == 'success' &&
+      needs.check-source.outputs.release_mode != 'none' &&
+      (
+        needs.check-source.outputs.release_mode == 'full' ||
+        (
+          needs.check-source.outputs.release_mode == 'profiles' &&
+          (
+            needs.build-profiles.result != 'success' ||
+            needs.build-profiles.outputs.profile_package_ready != 'true'
+          )
+        )
+      )
     runs-on: windows-latest
 
     steps:
@@ -228,27 +493,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Prepare upstream changelog link
-        id: changelog
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CURRENT_SOURCE_SHA: ${{ steps.info.outputs.sha }}
-        run: |
-          set -euo pipefail
-          previous_source_sha="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
-            jq -r --arg current "${CURRENT_SOURCE_SHA}" '
-              [.[][] | select(.draft == false and .prerelease == false)]
-              | sort_by(.published_at // .created_at // "") | reverse
-              | map((.body // "") | try capture("Source commit: [^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{40})").sha catch "")
-              | map(select(length == 40 and . != $current)) | .[0] // empty
-            ')"
-          if [[ -n "${previous_source_sha}" ]]; then
-            compare_url="https://github.com/Skoma93/OrcaSlicer/compare/${previous_source_sha}...${CURRENT_SOURCE_SHA}"
-          else
-            compare_url="https://github.com/Skoma93/OrcaSlicer/commits/cu-dev2"
-          fi
-          echo "url=${compare_url}" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -265,9 +509,58 @@ jobs:
             Source ref: \`${{ steps.info.outputs.source_ref }}\`
             Source commit: \`${{ steps.info.outputs.sha }}\`
 
-            **Upstream source comparison:** ${{ steps.changelog.outputs.url }}
+            **Upstream source comparison:** ${{ needs.check-source.outputs.changelog_url }}
 
             Built by this repository's GitHub Actions workflow.
           files: |
             source\\build\\OrcaSlicerForCraftbot_Windows_Installer_*.exe
             source\\build\\OrcaSlicerForCraftbot_Windows_*_portable.zip
+
+  release-profiles:
+    name: Publish system profile update
+    needs: [check-source, build-profiles]
+    if: >-
+      needs.check-source.outputs.release_mode == 'profiles' &&
+      needs.build-profiles.result == 'success' &&
+      needs.build-profiles.outputs.profile_package_ready == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download profile bundle
+        uses: actions/download-artifact@v7
+        with:
+          name: OrcaSlicer-System-Profiles
+          path: profile-assets
+
+      - name: Verify profile bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh profile-assets/OrcaSlicer_System_Profiles_*.zip
+          test "$(find profile-assets -maxdepth 1 -name 'OrcaSlicer_System_Profiles_*.zip' -type f | wc -l)" -eq 1
+
+      - name: Create profile-only GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: craftbot-${{ needs.check-source.outputs.source_sha }}
+          name: OrcaSlicer System Profile Update (${{ needs.check-source.outputs.source_ref }} - ${{ needs.check-source.outputs.short_sha }})
+          prerelease: false
+          generate_release_notes: false
+          body: |
+            Automated system-profile update from Skoma's OrcaSlicer source.
+
+            This release contains the updated, packaged `resources/profiles/` directory. It does not include a new OrcaSlicer application build.
+
+            **Installation:** Close OrcaSlicer and back up the existing `resources/profiles/` directory in your installation. Extract the ZIP into the OrcaSlicer installation directory, preserving the `resources/profiles/` paths and replacing matching files. Restart OrcaSlicer afterwards.
+
+            Source repository: https://github.com/Skoma93/OrcaSlicer
+            Source ref: `${{ needs.check-source.outputs.source_ref }}`
+            Source commit: `${{ needs.check-source.outputs.source_sha }}`
+
+            **Upstream source comparison:** ${{ needs.check-source.outputs.changelog_url }}
+
+            Built by this repository's GitHub Actions workflow.
+          files: |
+            profile-assets/OrcaSlicer_System_Profiles_*.zip
