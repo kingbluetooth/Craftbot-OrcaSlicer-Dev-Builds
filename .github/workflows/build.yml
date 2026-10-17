@@ -97,21 +97,28 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # version.inc defines the base version on a line like:
-          # set(SoftFever_VERSION "2.5.0-dev")
-          # Extract the literal value without regex backslash escaping.
+          # version.inc uses CMake's literal set(SoftFever_VERSION "...")
+          # declaration. Extract its quoted value without using a regex.
           $versionLine = Get-Content version.inc |
-            Select-String -SimpleMatch 'SoftFever_VERSION "' |
+            Select-String -SimpleMatch 'SoftFever_VERSION' |
             Select-Object -First 1 -ExpandProperty Line
-          if ($null -eq $versionLine) {
-            throw "No SoftFever_VERSION declaration found in version.inc"
+          if ([string]::IsNullOrWhiteSpace($versionLine) -or -not $versionLine.Contains('set(')) {
+            throw "No SoftFever_VERSION set() declaration found in version.inc"
           }
 
-          $versionParts = $versionLine.Split([char]34)
-          if ($versionParts.Length -lt 3 -or [string]::IsNullOrWhiteSpace($versionParts[1])) {
+          $quote = [string][char]34
+          $firstQuote = $versionLine.IndexOf($quote)
+          if ($firstQuote -lt 0) {
             throw "Malformed SoftFever_VERSION declaration: $versionLine"
           }
-          $version = $versionParts[1]
+          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
+          if ($secondQuote -lt 0) {
+            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          }
+          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "SoftFever_VERSION declaration has an empty value"
+          }
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
