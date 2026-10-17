@@ -97,27 +97,19 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # Read the first literal CMake declaration. Using character-code
-          # indices avoids regular-expression and quote-escaping pitfalls.
+          # Read the base version from the first CMake set() declaration.
+          # Escape double quotes as a character class rather than a literal quote.
           $versionLine = Get-Content version.inc |
-            Where-Object { $_.StartsWith('set(SoftFever_VERSION ') } |
+            Where-Object { $_ -match 'SoftFever_VERSION' } |
             Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($versionLine)) {
-            throw "No literal SoftFever_VERSION declaration found in version.inc"
+          if (-not $versionLine) {
+            throw "No SoftFever_VERSION line found in version.inc"
           }
-          $quote = [char]34
-          $firstQuote = $versionLine.IndexOf($quote)
-          if ($firstQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          $versionMatch = [regex]::Match($versionLine, '[`"]([^`"]+)[`"]')
+          if (-not $versionMatch.Success) {
+            throw "Could not extract a quoted version from: $versionLine"
           }
-          $secondQuote = $versionLine.IndexOf($quote, $firstQuote + 1)
-          if ($secondQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
-          }
-          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION value is empty"
-          }
+          $version = $versionMatch.Groups[1].Value
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
