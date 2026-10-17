@@ -97,29 +97,22 @@ jobs:
           $buildScriptSha = git rev-parse HEAD:build_win.bat
           $sourceRef = "${{ inputs.source_ref }}"
 
-          # version.inc defines the base version with a literal CMake set() line.
+          # Read the first literal version definition from CMake's version.inc.
           $versionLine = Get-Content version.inc |
             Where-Object { $_.TrimStart().StartsWith('set(SoftFever_VERSION ') } |
             Select-Object -First 1
-
           if ([string]::IsNullOrWhiteSpace($versionLine)) {
             throw "No literal SoftFever_VERSION declaration found in version.inc"
           }
 
-          $firstQuote = $versionLine.IndexOf([char]34)
-          if ($firstQuote -lt 0) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
+          # PowerShell treats backslashes literally; this pattern has one escape
+          # before each CMake parenthesis and captures the quoted base version.
+          $versionPattern = 'set\(SoftFever_VERSION\s+"([^"]+)"\)'
+          $versionMatch = [regex]::Match($versionLine, $versionPattern)
+          if (-not $versionMatch.Success) {
+            throw "Could not extract SoftFever_VERSION from line: $versionLine"
           }
-
-          $secondQuote = $versionLine.IndexOf([char]34, $firstQuote + 1)
-          if ($secondQuote -le $firstQuote) {
-            throw "Malformed SoftFever_VERSION declaration: $versionLine"
-          }
-
-          $version = $versionLine.Substring($firstQuote + 1, $secondQuote - $firstQuote - 1)
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw "SoftFever_VERSION declaration has an empty value"
-          }
+          $version = $versionMatch.Groups[1].Value
 
           "sha=$sha" >> $env:GITHUB_OUTPUT
           "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
